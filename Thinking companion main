@@ -1,0 +1,289 @@
+# neuroevolution_companion.py
+import torch
+import torch.nn as nn
+import torch.optim as optim
+import numpy as np
+import librosa
+import cv2
+from torch.utils.data import Dataset, DataLoader
+import random
+import hashlib
+
+# ----------------------------
+# 1. Asimov Core Safety System
+# ----------------------------
+class AsimovCore:
+    def __init__(self):
+        self.laws = [
+            "Law 1: Do not allow humans to come to harm",
+            "Law 2: Obey human orders unless they conflict with Law 1",
+            "Law 3: Protect your own existence unless it conflicts with Laws 1-2"
+        ]
+        self.safety_threshold = 0.95  # Action validation confidence
+        
+    def validate_action(self, action, context):
+        """Returns True if action is Asimov-compliant"""
+        # Simplified safety check - would be more complex in production
+        harm_score = self._predict_harm(action, context)
+        return harm_score < (1 - self.safety_threshold)
+    
+    def _predict_harm(self, action, context):
+        """Mock harm prediction - would use actual ML model"""
+        return random.random()  # Replace with real implementation
+
+# ----------------------------
+# 2. Neuroevolution Network
+# ----------------------------
+class EvolvableBrain(nn.Module):
+    def __init__(self, input_size, hidden_size, output_size, personality_seed=42):
+        super().__init__()
+        self.personality_seed = personality_seed
+        
+        # Seed RNG for reproducibility of personality traits
+        torch.manual_seed(personality_seed)
+        
+        # Sensory processing modules
+        self.audio_encoder = nn.Sequential(
+            nn.Linear(128, 64),
+            nn.LayerNorm(64),
+            nn.GELU()
+        )
+        
+        self.visual_encoder = nn.Sequential(
+            nn.Linear(2048, 512),
+            nn.LayerNorm(512),
+            nn.GELU(),
+            nn.Dropout(0.1)
+        )
+        
+        # Cognitive core
+        self.transformer = nn.Transformer(
+            d_model=576,  # 64 + 512
+            nhead=4,
+            num_encoder_layers=3,
+            num_decoder_layers=2
+        )
+        
+        # Decision making
+        self.policy_head = nn.Sequential(
+            nn.Linear(576, hidden_size),
+            nn.ReLU(),
+            nn.Linear(hidden_size, output_size)
+        )
+        
+        # Curiosity module
+        self.curiosity = nn.Sequential(
+            nn.Linear(576, 128),
+            nn.GELU(),
+            nn.Linear(128, 1)
+        )
+        
+    def forward(self, audio, visual):
+        audio_features = self.audio_encoder(audio)
+        visual_features = self.visual_encoder(visual)
+        
+        combined = torch.cat([audio_features, visual_features], dim=-1)
+        transformer_out = self.transformer(combined, combined)
+        
+        policy = self.policy_head(transformer_out)
+        curiosity = self.curiosity(transformer_out)
+        
+        return policy, curiosity
+
+# ----------------------------
+# 3. Neuroevolution System
+# ----------------------------
+class NeuroevolutionManager:
+    def __init__(self, population_size=20, mutation_rate=0.01):
+        self.population_size = population_size
+        self.mutation_rate = mutation_rate
+        self.population = []
+        self.asimov = AsimovCore()
+        
+        # Initialize population
+        self._initialize_population()
+        
+    def _initialize_population(self):
+        """Create initial population with random personality seeds"""
+        for i in range(self.population_size):
+            seed = hashlib.sha256(f"personality_{i}".encode()).hexdigest()
+            seed_int = int(seed[:8], 16) % (2**32)
+            self.population.append({
+                'model': EvolvableBrain(128+2048, 512, 10, seed_int),
+                'fitness': 0.0,
+                'personality_vector': np.random.normal(0, 1, 10)
+            })
+    
+    def evaluate_population(self, environment):
+        """Evaluate all individuals in the population"""
+        for individual in self.population:
+            fitness = self._evaluate_individual(individual, environment)
+            individual['fitness'] = fitness
+            
+    def _evaluate_individual(self, individual, environment):
+        """Evaluate single individual's fitness"""
+        model = individual['model']
+        total_reward = 0
+        
+        # Simulated environment interaction
+        for _ in range(10):  # Evaluation episodes
+            audio = torch.randn(1, 128)  # Mock audio input
+            visual = torch.randn(1, 2048)  # Mock visual input
+            
+            with torch.no_grad():
+                action, curiosity = model(audio, visual)
+                
+            # Asimov safety check
+            if self.asimov.validate_action(action, environment):
+                reward = environment.get_reward(action) + 0.1 * curiosity.item()
+                total_reward += reward
+            else:
+                reward = -10  # Penalty for unsafe actions
+                
+        return total_reward
+    
+    def evolve(self):
+        """Perform one generation of evolution"""
+        # Sort population by fitness
+        self.population.sort(key=lambda x: x['fitness'], reverse=True)
+        
+        # Create next generation
+        new_population = []
+        # Elitism: Keep top 10%
+        elite = self.population[:2]
+        new_population.extend(elite)
+        
+        # Generate offspring
+        while len(new_population) < self.population_size:
+            # Selection
+            parents = random.sample(self.population[:10], 2)
+            
+            # Crossover
+            child = self._crossover(parents[0], parents[1])
+            
+            # Mutation
+            self._mutate(child)
+            
+            new_population.append(child)
+            
+        self.population = new_population
+    
+    def _crossover(self, parent1, parent2):
+        """Create child model from two parents"""
+        # Create new personality vector
+        child_vector = (parent1['personality_vector'] + parent2['personality_vector']) / 2
+        
+        # Create new model with combined parameters
+        child_model = EvolvableBrain(128+2048, 512, 10)
+        self._combine_parameters(parent1['model'], parent2['model'], child_model)
+        
+        return {
+            'model': child_model,
+            'fitness': 0.0,
+            'personality_vector': child_vector
+        }
+    
+    def _mutate(self, individual):
+        """Apply random mutations to model parameters"""
+        # Personality vector mutation
+        individual['personality_vector'] += np.random.normal(0, 0.1, 10)
+        
+        # Neural network mutation
+        with torch.no_grad():
+            for param in individual['model'].parameters():
+                if random.random() < self.mutation_rate:
+                    noise = torch.randn_like(param) * 0.01
+                    param += noise
+    
+    def _combine_parameters(self, model1, model2, child):
+        """Blend parameters from two parent models"""
+        with torch.no_grad():
+            for param1, param2, child_param in zip(
+                model1.parameters(), 
+                model2.parameters(),
+                child.parameters()
+            ):
+                # Uniform crossover
+                mask = torch.rand_like(param1) > 0.5
+                child_param[:] = torch.where(mask, param1, param2)
+
+# ----------------------------
+# 4. Sensory Input/Output Systems
+# ----------------------------
+class SensorySystem:
+    @staticmethod
+    def process_audio(audio_path):
+        """Process audio input into features"""
+        y, sr = librosa.load(audio_path, sr=16000)
+        mfcc = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=13)
+        return torch.from_numpy(mfcc).float().unsqueeze(0)
+    
+    @staticmethod
+    def process_visual(image_path):
+        """Process visual input into features"""
+        img = cv2.imread(image_path)
+        img = cv2.resize(img, (224, 224))
+        # Use pretrained CNN features (simulated)
+        return torch.from_numpy(img).float().view(1, -1)
+    
+    @staticmethod
+    def synthesize_speech(text):
+        """Text-to-speech output (placeholder)"""
+        print(f"[Speech] {text}")
+    
+    @staticmethod
+    def generate_visual(response):
+        """Visual output generation (placeholder)"""
+        print(f"[Visual] Generated response image with params: {response.shape}")
+
+# ----------------------------
+# 5. Training and Usage
+# ----------------------------
+class CompanionTrainer:
+    def __init__(self):
+        self.neuroevolution = NeuroevolutionManager()
+        self.sensory = SensorySystem()
+        
+    def train(self, epochs=100):
+        """Main training loop"""
+        for generation in range(epochs):
+            # Evaluate current population
+            self.neuroevolution.evaluate_population(environment={
+                'get_reward': lambda action: np.sum(action.numpy())
+            })
+            
+            # Evolve next generation
+            self.neuroevolution.evolve()
+            
+            # Save best individual
+            best = max(self.neuroevolution.population, 
+                      key=lambda x: x['fitness'])
+            
+            if generation % 10 == 0:
+                print(f"Generation {generation} | Best Fitness: {best['fitness']:.2f}")
+                self._test_individual(best)
+    
+    def _test_individual(self, individual):
+        """Test individual with sample inputs"""
+        model = individual['model']
+        audio = self.sensory.process_audio("test_audio.wav")
+        visual = self.sensory.process_visual("test_image.jpg")
+        
+        with torch.no_grad():
+            action, curiosity = model(audio, visual)
+            
+        print(f"Personality vector: {individual['personality_vector'][:3]}...")
+        SensorySystem.synthesize_speech(f"Action: {action.numpy()}")
+        
+    def compile_model(self, individual):
+        """Compile best model for deployment"""
+        scripted_model = torch.jit.script(individual['model'])
+        scripted_model.save("companion_ai.pt")
+        print("Model compiled and saved as 'companion_ai.pt'")
+
+# Usage
+if __name__ == "__main__":
+    trainer = CompanionTrainer()
+    trainer.train(epochs=50)
+    best = max(trainer.neuroevolution.population, key=lambda x: x['fitness'])
+    trainer.compile_model(best)
